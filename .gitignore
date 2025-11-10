@@ -4,6 +4,7 @@ logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 lerna-debug.log*
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
@@ -81,11 +82,11 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+dist-ssr
 
 # Gatsby files
 .cache/
-# Comment in the public line in if your project uses Gatsby and not Next.js
-# https://nextjs.org/blog/next-9-1#public-directory-support
+# public (if using Gatsby)
 # public
 
 # vuepress build output
@@ -133,6 +134,17 @@ dist
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
 # Vite logs files
 vite.config.js.timestamp-*
