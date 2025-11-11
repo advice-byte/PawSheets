@@ -118,6 +118,7 @@ export default function Auth({ onAuth }) {
         {mode === 'login' && (
           <>
             <button
+              type="button"
               onClick={handleLogin}
               style={{
                 width: '100%',
@@ -149,6 +150,7 @@ export default function Auth({ onAuth }) {
         {mode === 'signup' && (
           <>
             <button
+              type="button"
               onClick={handleSignUp}
               style={{
                 width: '100%',
@@ -176,6 +178,7 @@ export default function Auth({ onAuth }) {
         {mode === 'forgot' && (
           <>
             <button
+              type="button"
               onClick={handleForgot}
               style={{
                 width: '100%',

@@ -12,18 +12,22 @@ export default function App() {
   const [stage, setStage] = useState("spreadsheet"); // spreadsheet | cardEditor | embeddedCode
   const [loading, setLoading] = useState(true);
 
-  // ---- Auth listener ----
+  // ---- Auth listener with debug ----
   useEffect(() => {
     const initAuth = async () => {
       const { data } = await supabase.auth.getSession();
-      setUser(data.session?.user ?? null);
+      console.log("Initial session data:", data);
+      const currentUser = data.session?.user ?? null;
+      setUser(currentUser);
       setLoading(false);
     };
     initAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        setUser(session?.user ?? null);
+        console.log("Auth state changed:", _event, session);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
       }
     );
 
@@ -70,6 +74,7 @@ export default function App() {
           if (insertErr) throw insertErr;
           ws = newWs;
         } else {
+          // Parse JSON safely
           try {
             ws.columns = Array.isArray(ws.columns)
               ? ws.columns
@@ -84,7 +89,7 @@ export default function App() {
 
           if (!ws.columns[0] || ws.columns[0].type !== "image") {
             ws.columns.unshift({ name: "Images", type: "image" });
-            ws.rows = ws.rows.map(row => [{ value: "", type: "image" }, ...row]);
+            ws.rows = ws.rows.map((row) => [{ value: "", type: "image" }, ...row]);
           }
         }
 
@@ -232,8 +237,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* RIGHT: Logout */}
-        <div style={{ zIndex: 2 }}>
+        {/* RIGHT: Logout + Test */}
+        <div style={{ zIndex: 2, display: "flex", gap: "8px", alignItems: "center" }}>
           <button
             onClick={() => supabase.auth.signOut()}
             style={{
@@ -248,6 +253,26 @@ export default function App() {
             }}
           >
             Logout
+          </button>
+          {/* TEST BUTTON */}
+          <button
+            onClick={async () => {
+              const { data, error } = await supabase.from("worksheets").select("*");
+              console.log("Test fetch worksheets:", data, error);
+              alert(data?.length ? "Fetched worksheets! Check console" : "No worksheets returned");
+            }}
+            style={{
+              backgroundColor: "#FFD700",
+              color: "#001f3f",
+              border: "none",
+              padding: "8px 14px",
+              borderRadius: "6px",
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.2s ease-in-out",
+            }}
+          >
+            Test Worksheet Fetch
           </button>
         </div>
       </header>
