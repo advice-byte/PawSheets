@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../supabaseClient.js";
 import { FaPalette, FaLayerGroup, FaShapes } from "react-icons/fa"; // icons for Themes/Layout/Colors
 
-export default function CardEditor({ worksheet, onBack }) {
+export default function CardEditor({ worksheet, onBack, onWorksheetChange }) { // <- added onWorksheetChange
   const [localWorksheet, setLocalWorksheet] = useState(worksheet || null);
   const [styles, setStyles] = useState({
     backgroundColor: "#ffffff",
@@ -22,6 +22,7 @@ export default function CardEditor({ worksheet, onBack }) {
     imageObjectFit: "contain",
     layout: "top-image",
     sizePreset: "medium",
+    imageSizePreset: "medium",
     cardShadow: true,
     borderRadius: 8,
     padding: 10,
@@ -90,7 +91,12 @@ export default function CardEditor({ worksheet, onBack }) {
     const sanitized = { ...newStyles };
     if (sanitized.borderColor === "transparent") sanitized.borderColor = "#cccccc";
     setStyles(sanitized);
-    setLocalWorksheet((prev) => ({ ...prev, styles: sanitized }));
+
+    const updatedWorksheet = { ...localWorksheet, styles: sanitized };
+    setLocalWorksheet(updatedWorksheet);
+
+    // --- NEW: Notify parent of update for live preview in CardEmbed ---
+    if (onWorksheetChange) onWorksheetChange(updatedWorksheet);
   };
 
   const applyTheme = (theme) => {
@@ -266,10 +272,11 @@ export default function CardEditor({ worksheet, onBack }) {
 
         {/* Section Content */}
         <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
+          {/* --- Themes --- */}
           {sidebarOpen && activeSection === "themes" && (
             <div>
               <h4>Themes</h4>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-start" }}>
                 {presetThemes.map((t) => (
                   <div key={t.id} onClick={() => applyTheme(t)} style={{ cursor: "pointer" }}>
                     <ThemePreviewMini theme={t} />
@@ -279,6 +286,7 @@ export default function CardEditor({ worksheet, onBack }) {
             </div>
           )}
 
+          {/* --- Layout --- */}
           {sidebarOpen && activeSection === "layout" && (
             <div>
               <h4>Layout & Arrangement</h4>
@@ -289,6 +297,7 @@ export default function CardEditor({ worksheet, onBack }) {
                   </div>
                 ))}
               </div>
+
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 {["column", "row", "grid"].map((opt) => (
                   <div key={opt} onClick={() => updateStyle({ ...styles, cardArrangement: opt })} style={sidebarOptionStyle(styles.cardArrangement === opt)}>
@@ -296,6 +305,8 @@ export default function CardEditor({ worksheet, onBack }) {
                   </div>
                 ))}
               </div>
+
+              {/* Card Size */}
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 {["small", "medium", "large"].map((p) => (
                   <div key={p} onClick={() => handleSizePreset(p)} style={sidebarOptionStyle(styles.sizePreset === p)}>
@@ -303,14 +314,33 @@ export default function CardEditor({ worksheet, onBack }) {
                   </div>
                 ))}
               </div>
+
+              {/* Image Size */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                {["small", "medium", "large"].map((s) => (
+                  <div key={s} onClick={() => updateStyle({
+                    ...styles,
+                    imageWidth: s === "small" ? 80 : s === "medium" ? 120 : 160,
+                    imageHeight: s === "small" ? 80 : s === "medium" ? 120 : 160,
+                    imageSizePreset: s
+                  })} style={sidebarOptionStyle(styles.imageSizePreset === s)}>
+                    Image {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={handleSave} style={{ ...buttonStyle, width: "100%", marginTop: 10 }}>
+                {saveMessage || "Save Changes"}
+              </button>
             </div>
           )}
 
+          {/* --- Colors --- */}
           {sidebarOpen && activeSection === "colors" && (
             <div>
               <h4>Card & Colors</h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <label>Font Family</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label style={{ fontWeight: 600 }}>Font Family</label>
                 <select value={styles.fontFamily} onChange={(e) => updateStyle({ ...styles, fontFamily: e.target.value })}>
                   <option value="Arial, sans-serif">Arial</option>
                   <option value="Verdana, sans-serif">Verdana</option>
@@ -318,83 +348,80 @@ export default function CardEditor({ worksheet, onBack }) {
                   <option value="Inter, sans-serif">Inter</option>
                 </select>
 
-                <label>Font Size Primary</label>
+                <label style={{ fontWeight: 600 }}>Font Size Primary</label>
                 <input type="number" value={styles.fontSizePrimary} onChange={(e) => updateStyle({ ...styles, fontSizePrimary: Number(e.target.value) })} />
 
-                <label>Font Size Secondary</label>
+                <label style={{ fontWeight: 600 }}>Font Size Secondary</label>
                 <input type="number" value={styles.fontSizeSecondary} onChange={(e) => updateStyle({ ...styles, fontSizeSecondary: Number(e.target.value) })} />
 
-                <label>Text Color</label>
+                <label style={{ fontWeight: 600 }}>Text Color</label>
                 <input type="color" value={styles.textColor} onChange={(e) => updateStyle({ ...styles, textColor: e.target.value })} />
 
-                <label>Card Color</label>
+                <label style={{ fontWeight: 600 }}>Card Color</label>
                 <input type="color" value={styles.backgroundColor} onChange={(e) => updateStyle({ ...styles, backgroundColor: e.target.value })} />
 
-                <label>Border Color</label>
+                <label style={{ fontWeight: 600 }}>Border Color</label>
                 <input type="color" value={styles.borderColor} onChange={(e) => updateStyle({ ...styles, borderColor: e.target.value })} />
 
-                <label>Border Width</label>
+                <label style={{ fontWeight: 600 }}>Border Width</label>
                 <input type="number" value={styles.borderWidth} onChange={(e) => updateStyle({ ...styles, borderWidth: Number(e.target.value) })} />
 
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <label>Card Shadow</label>
+                  <label style={{ fontWeight: 600 }}>Card Shadow</label>
                   <input type="checkbox" checked={!!styles.cardShadow} onChange={(e) => updateStyle({ ...styles, cardShadow: e.target.checked })} />
                 </div>
 
-                <label>Border Radius</label>
+                <label style={{ fontWeight: 600 }}>Border Radius</label>
                 <input type="number" value={styles.borderRadius} onChange={(e) => updateStyle({ ...styles, borderRadius: Number(e.target.value) })} />
               </div>
+              <button onClick={handleSave} style={{ ...buttonStyle, width: "100%", marginTop: 12 }}>
+                {saveMessage || "Save Changes"}
+              </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* --- Preview --- */}
-      <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <button onClick={onBack} style={buttonStyle}>← Back to Spreadsheet</button>
-          <div style={{ fontWeight: 700 }}>Live Preview</div>
-          <div />
-        </div>
-        <div>{renderCard()}</div>
+      {/* --- Card Preview Area --- */}
+      <div style={{ flex: 1, overflowY: "auto", padding: 12, background: "#f4f4f4" }}>
+        <button onClick={onBack} style={{ marginBottom: 12 }}>← Back</button>
+        {renderCard()}
       </div>
     </div>
   );
 }
 
-// --- Shared Styles ---
+// --- Helper Styles ---
+const sidebarOptionStyle = (selected) => ({
+  padding: "6px 12px",
+  cursor: "pointer",
+  background: selected ? "#001f3f" : "#fff",
+  color: selected ? "#FFD700" : "#333",
+  borderRadius: 4,
+  border: "1px solid #ccc",
+  fontSize: 12,
+  textAlign: "center",
+});
+
 const buttonStyle = {
+  padding: "8px 12px",
   background: "#001f3f",
   color: "#FFD700",
   border: "none",
-  padding: "8px 10px",
-  borderRadius: 6,
+  borderRadius: 4,
   cursor: "pointer",
-  fontWeight: 700,
+  fontWeight: 600,
 };
 
-const sidebarOptionStyle = (active) => ({
-  flex: 1,
-  padding: 8,
-  borderRadius: 8,
-  cursor: "pointer",
-  textAlign: "center",
-  border: active ? "2px solid #FFD700" : "1px solid #e6e6e6",
-  background: active ? "#001f3f" : "#fff",
-  color: active ? "#FFD700" : "#111",
-  fontWeight: active ? 700 : 500,
-});
-
-const tabButtonStyle = (active, open) => ({
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: open ? 6 : 0,
+const tabButtonStyle = (active, sidebarOpen) => ({
   padding: 6,
   cursor: "pointer",
-  background: active ? "#001f3f" : "#fff",
-  color: active ? "#FFD700" : "#111",
-  border: active ? "2px solid #FFD700" : "1px solid #e6e6e6",
-  borderRadius: 6,
-  fontWeight: active ? 700 : 500,
+  background: active ? "#001f3f" : "transparent",
+  color: active ? "#FFD700" : "#333",
+  border: "none",
+  borderRadius: 4,
+  display: "flex",
+  alignItems: "center",
+  gap: sidebarOpen ? 4 : 0,
+  fontSize: 14,
 });
