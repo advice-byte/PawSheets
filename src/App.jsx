@@ -5,54 +5,49 @@ import Auth from "./components/Auth.jsx";
 import EnhancedSpreadsheet from "./components/EnhancedSpreadsheet.jsx";
 import CardEditor from "./components/CardEditor.jsx";
 import CardEmbed from "./components/pages/CardEmbed.jsx";
+import FeedbackForm from "./FeedbackForm.jsx";
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [worksheet, setWorksheet] = useState(null);
-  const [stage, setStage] = useState("spreadsheet"); // spreadsheet | cardEditor | embeddedCode
+  const [stage, setStage] = useState("spreadsheet");
   const [loading, setLoading] = useState(true);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
-  // ---- Auth listener with debug ----
+  // Auth listener
   useEffect(() => {
     const initAuth = async () => {
       const { data } = await supabase.auth.getSession();
-      console.log("Initial session data:", data);
-      const currentUser = data.session?.user ?? null;
-      setUser(currentUser);
+      setUser(data.session?.user ?? null);
       setLoading(false);
     };
     initAuth();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        console.log("Auth state changed:", _event, session);
-        const currentUser = session?.user ?? null;
-        setUser(currentUser);
-      }
-    );
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
 
     return () => authListener.subscription.unsubscribe();
   }, []);
 
-  // ---- Worksheet loading ----
+  // Load worksheet for the user
   useEffect(() => {
     if (!user) return;
     setLoading(true);
 
     const loadWorksheet = async () => {
       try {
-        let { data: worksheets, error } = await supabase
+        const { data: worksheets } = await supabase
           .from("worksheets")
           .select("*")
           .eq("user_id", user.id)
           .limit(1);
 
-        if (error) throw error;
-
         let ws = worksheets?.[0];
 
+        // If no worksheet exists, create a new one
         if (!ws) {
-          const { data: newWs, error: insertErr } = await supabase
+          const { data: newWs } = await supabase
             .from("worksheets")
             .insert([
               {
@@ -62,40 +57,25 @@ export default function App() {
                   { name: "Images", type: "image" },
                   ...Array(4).fill({ name: "", type: "text" }),
                 ],
-                rows: Array(5)
-                  .fill(null)
-                  .map(() =>
-                    Array(5).fill({ value: "", type: "text" })
-                  ),
+                rows: Array(5).fill(null).map(() => Array(5).fill({ value: "", type: "text" })),
               },
             ])
             .select()
             .single();
-          if (insertErr) throw insertErr;
           ws = newWs;
-        } else {
-          // Parse JSON safely
-          try {
-            ws.columns = Array.isArray(ws.columns)
-              ? ws.columns
-              : JSON.parse(ws.columns || "[]");
-            ws.rows = Array.isArray(ws.rows)
-              ? ws.rows
-              : JSON.parse(ws.rows || "[]");
-          } catch {
-            ws.columns = ws.columns || [{ name: "Images", type: "image" }];
-            ws.rows = ws.rows || [];
-          }
+        }
 
-          if (!ws.columns[0] || ws.columns[0].type !== "image") {
-            ws.columns.unshift({ name: "Images", type: "image" });
-            ws.rows = ws.rows.map((row) => [{ value: "", type: "image" }, ...row]);
-          }
+        // Ensure columns and rows are arrays
+        ws.columns = Array.isArray(ws.columns) ? ws.columns : JSON.parse(ws.columns || "[]");
+        ws.rows = Array.isArray(ws.rows) ? ws.rows : JSON.parse(ws.rows || "[]");
+
+        // Ensure first column is always Images
+        if (!ws.columns[0] || ws.columns[0].type !== "image") {
+          ws.columns.unshift({ name: "Images", type: "image" });
+          ws.rows = ws.rows.map((row) => [{ value: "", type: "image" }, ...row]);
         }
 
         setWorksheet(ws);
-      } catch (err) {
-        console.error("Error loading worksheet:", err);
       } finally {
         setLoading(false);
       }
@@ -104,52 +84,33 @@ export default function App() {
     loadWorksheet();
   }, [user]);
 
-  // ---- Save worksheet automatically on changes ----
+  // Auto-save whenever worksheet changes
   useEffect(() => {
     if (!worksheet || !user) return;
+    const timeout = setTimeout(async () => {
+      await supabase
+        .from("worksheets")
+        .upsert({
+          id: worksheet.id,
+          name: worksheet.name,
+          columns: worksheet.columns,
+          rows: worksheet.rows,
+          user_id: user.id,
+        });
+    }, 2000); // save 2s after changes
 
-    const saveWorksheet = async () => {
-      try {
-        await supabase
-          .from("worksheets")
-          .update({
-            name: worksheet.name,
-            columns: worksheet.columns,
-            rows: worksheet.rows,
-          })
-          .eq("id", worksheet.id);
-      } catch (err) {
-        console.error("Failed to save worksheet:", err);
-      }
-    };
-
-    saveWorksheet();
+    return () => clearTimeout(timeout);
   }, [worksheet, user]);
 
-  // ---- Loading / Auth ----
   if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
-  if (!user) return <Auth onAuth={setUser} />;
-  if (!worksheet)
-    return <div style={{ padding: 20 }}>⚠️ No worksheet loaded. Please refresh.</div>;
+  if (!user) return <Auth onAuth={(u) => setUser(u)} />;
 
-  // ---- Tab content ----
   const renderStage = () => {
     switch (stage) {
       case "spreadsheet":
-        return (
-          <EnhancedSpreadsheet
-            worksheet={worksheet}
-            setWorksheet={setWorksheet}
-            user={user}
-          />
-        );
+        return <EnhancedSpreadsheet worksheet={worksheet} setWorksheet={setWorksheet} user={user} />;
       case "cardEditor":
-        return (
-          <CardEditor
-            worksheet={worksheet}
-            onBack={() => setStage("spreadsheet")}
-          />
-        );
+        return <CardEditor worksheet={worksheet} onBack={() => setStage("spreadsheet")} />;
       case "embeddedCode":
         return <CardEmbed worksheet={worksheet} />;
       default:
@@ -158,18 +119,7 @@ export default function App() {
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        width: "100vw",
-        boxSizing: "border-box",
-        overflow: "hidden",
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
-      {/* Header */}
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", width: "100vw" }}>
       <header
         style={{
           display: "flex",
@@ -180,11 +130,9 @@ export default function App() {
           color: "#FFD700",
           position: "relative",
           boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-          flexWrap: "wrap",
         }}
       >
-        {/* LEFT: Tabs */}
-        <div style={{ display: "flex", gap: "12px", zIndex: 2 }}>
+        <div style={{ display: "flex", gap: "12px" }}>
           {["spreadsheet", "cardEditor", "embeddedCode"].map((tab) => (
             <div
               key={tab}
@@ -200,109 +148,61 @@ export default function App() {
                 transition: "all 0.2s ease-in-out",
               }}
             >
-              {tab === "spreadsheet"
-                ? "Spreadsheet"
-                : tab === "cardEditor"
-                ? "Card Editor"
-                : "Embedded Code"}
+              {tab === "spreadsheet" ? "Spreadsheet" : tab === "cardEditor" ? "Card Editor" : "Embedded Code"}
             </div>
           ))}
         </div>
 
-        {/* CENTER: Brand */}
-        <div
+        <div style={{ fontWeight: 700, fontSize: 20, color: "#FFD700" }}>Enso Digital Suite</div>
+
+        <button
+          onClick={() => supabase.auth.signOut()}
           style={{
-            position: "absolute",
-            left: "50%",
-            transform: "translateX(-50%)",
-            textAlign: "center",
-            zIndex: 1,
+            backgroundColor: "#FFD700",
+            color: "#001f3f",
+            border: "none",
+            padding: "8px 14px",
+            borderRadius: "6px",
+            fontWeight: 600,
+            cursor: "pointer",
           }}
         >
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: 20,
-              letterSpacing: 0.5,
-              marginBottom: 2,
-              textDecoration: "underline",
-              textDecorationColor: "#FFD700",
-              textDecorationThickness: "2px",
-            }}
-          >
-            Enso Advisory Group
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 500, letterSpacing: 0.5 }}>
-            PawSheets
-          </div>
-        </div>
-
-        {/* RIGHT: Logout + Test */}
-        <div style={{ zIndex: 2, display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            style={{
-              backgroundColor: "#FFD700",
-              color: "#001f3f",
-              border: "none",
-              padding: "8px 14px",
-              borderRadius: "6px",
-              fontWeight: 600,
-              cursor: "pointer",
-              transition: "all 0.2s ease-in-out",
-            }}
-          >
-            Logout
-          </button>
-          {/* TEST BUTTON */}
-          <button
-            onClick={async () => {
-              const { data, error } = await supabase.from("worksheets").select("*");
-              console.log("Test fetch worksheets:", data, error);
-              alert(data?.length ? "Fetched worksheets! Check console" : "No worksheets returned");
-            }}
-            style={{
-              backgroundColor: "#FFD700",
-              color: "#001f3f",
-              border: "none",
-              padding: "8px 14px",
-              borderRadius: "6px",
-              fontWeight: 600,
-              cursor: "pointer",
-              transition: "all 0.2s ease-in-out",
-            }}
-          >
-            Test Worksheet Fetch
-          </button>
-        </div>
+          Logout
+        </button>
       </header>
 
-      {/* Main Content */}
-      <div
-        style={{
-          flex: 1,
-          width: "100%",
-          overflowX: "auto",
-          overflowY: "auto",
-          padding: "10px",
-          boxSizing: "border-box",
-        }}
-      >
-        {renderStage()}
-      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: 10 }}>{renderStage()}</div>
 
-      {/* Footer */}
       <footer
         style={{
           backgroundColor: "#001f3f",
           color: "#FFD700",
-          textAlign: "center",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
           padding: "10px 20px",
-          fontSize: 14,
         }}
       >
-        © {new Date().getFullYear()} Enso Advisory Group
+        <button
+          style={{
+            backgroundColor: "#FFD700",
+            color: "#001f3f",
+            border: "none",
+            padding: "6px 12px",
+            borderRadius: "6px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+          onClick={() => setFeedbackOpen(true)}
+        >
+          Feedback
+        </button>
+
+        <div>© {new Date().getFullYear()} Enso Digital Suite</div>
+        <div>Version 0.0.1</div>
       </footer>
+
+      {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }
