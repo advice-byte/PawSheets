@@ -1,10 +1,9 @@
 // src/App.jsx
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import Auth from "./components/Auth.jsx";
 import EnhancedSpreadsheet from "./components/EnhancedSpreadsheet.jsx";
 import CardEditor from "./components/CardEditor.jsx";
-import CardEmbed from "./components/pages/CardEmbed.jsx";
 import FeedbackForm from "./FeedbackForm.jsx";
 
 export default function App() {
@@ -13,26 +12,34 @@ export default function App() {
   const [stage, setStage] = useState("spreadsheet");
   const [loading, setLoading] = useState(true);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const saveTimeout = useRef(null);
 
-  // Auth listener
+  // ✅ Improved Auth handling (fewer re-renders)
   useEffect(() => {
+    let mounted = true;
+
     const initAuth = async () => {
       const { data } = await supabase.auth.getSession();
-      setUser(data.session?.user ?? null);
-      setLoading(false);
+      if (mounted) {
+        setUser(data.session?.user ?? null);
+        setLoading(false);
+      }
     };
     initAuth();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      if (mounted) setUser(session?.user ?? null);
     });
 
-    return () => authListener.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
-  // Load worksheet for the user
+  // ✅ Load worksheet (only runs when user changes AND worksheet not already loaded)
   useEffect(() => {
-    if (!user) return;
+    if (!user || worksheet) return; // <-- Skip if already loaded
     setLoading(true);
 
     const loadWorksheet = async () => {
@@ -45,7 +52,6 @@ export default function App() {
 
         let ws = worksheets?.[0];
 
-        // If no worksheet exists, create a new one
         if (!ws) {
           const { data: newWs } = await supabase
             .from("worksheets")
@@ -57,7 +63,9 @@ export default function App() {
                   { name: "Images", type: "image" },
                   ...Array(4).fill({ name: "", type: "text" }),
                 ],
-                rows: Array(5).fill(null).map(() => Array(5).fill({ value: "", type: "text" })),
+                rows: Array(5)
+                  .fill(null)
+                  .map(() => Array(5).fill({ value: "", type: "text" })),
               },
             ])
             .select()
@@ -65,11 +73,9 @@ export default function App() {
           ws = newWs;
         }
 
-        // Ensure columns and rows are arrays
         ws.columns = Array.isArray(ws.columns) ? ws.columns : JSON.parse(ws.columns || "[]");
         ws.rows = Array.isArray(ws.rows) ? ws.rows : JSON.parse(ws.rows || "[]");
 
-        // Ensure first column is always Images
         if (!ws.columns[0] || ws.columns[0].type !== "image") {
           ws.columns.unshift({ name: "Images", type: "image" });
           ws.rows = ws.rows.map((row) => [{ value: "", type: "image" }, ...row]);
@@ -82,25 +88,31 @@ export default function App() {
     };
 
     loadWorksheet();
-  }, [user]);
+  }, [user, worksheet]);
 
-  // Auto-save whenever worksheet changes
+  // ✅ Debounced auto-save (improves performance)
+  const debouncedSave = useCallback(
+    (ws) => {
+      if (saveTimeout.current) clearTimeout(saveTimeout.current);
+      saveTimeout.current = setTimeout(async () => {
+        if (!ws || !user) return;
+        await supabase
+          .from("worksheets")
+          .upsert({
+            id: ws.id,
+            name: ws.name,
+            columns: ws.columns,
+            rows: ws.rows,
+            user_id: user.id,
+          });
+      }, 2000);
+    },
+    [user]
+  );
+
   useEffect(() => {
-    if (!worksheet || !user) return;
-    const timeout = setTimeout(async () => {
-      await supabase
-        .from("worksheets")
-        .upsert({
-          id: worksheet.id,
-          name: worksheet.name,
-          columns: worksheet.columns,
-          rows: worksheet.rows,
-          user_id: user.id,
-        });
-    }, 2000); // save 2s after changes
-
-    return () => clearTimeout(timeout);
-  }, [worksheet, user]);
+    if (worksheet) debouncedSave(worksheet);
+  }, [worksheet, debouncedSave]);
 
   if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
   if (!user) return <Auth onAuth={(u) => setUser(u)} />;
@@ -111,29 +123,61 @@ export default function App() {
         return <EnhancedSpreadsheet worksheet={worksheet} setWorksheet={setWorksheet} user={user} />;
       case "cardEditor":
         return <CardEditor worksheet={worksheet} onBack={() => setStage("spreadsheet")} />;
-      case "embeddedCode":
-        return <CardEmbed worksheet={worksheet} />;
       default:
         return null;
     }
   };
 
+  // 🔵 Shared tech-style animated background
+  const techGradient = {
+    position: "absolute",
+    inset: 0,
+    background: "linear-gradient(135deg, #001f3f 0%, #012d5a 50%, #001f3f 100%)",
+    backgroundSize: "200% 200%",
+    animation: "gradientShift 10s ease infinite",
+    zIndex: 0,
+    overflow: "hidden",
+  };
+
+  const techGrid = {
+    position: "absolute",
+    inset: 0,
+    backgroundImage:
+      "linear-gradient(rgba(255,215,0,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,215,0,0.08) 1px, transparent 1px)",
+    backgroundSize: "40px 40px",
+    zIndex: 0,
+  };
+
+  const gradientAnimation = `
+    @keyframes gradientShift {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  `;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", width: "100vw" }}>
+      <style>{gradientAnimation}</style>
+
+      {/* Header with tech animation */}
       <header
         style={{
+          position: "relative",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           padding: "12px 24px",
-          backgroundColor: "#001f3f",
           color: "#FFD700",
-          position: "relative",
           boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+          overflow: "hidden",
         }}
       >
-        <div style={{ display: "flex", gap: "12px" }}>
-          {["spreadsheet", "cardEditor", "embeddedCode"].map((tab) => (
+        <div style={techGradient}></div>
+        <div style={techGrid}></div>
+
+        <div style={{ display: "flex", gap: "12px", position: "relative", zIndex: 1 }}>
+          {["spreadsheet", "cardEditor"].map((tab) => (
             <div
               key={tab}
               onClick={() => setStage(tab)}
@@ -148,16 +192,32 @@ export default function App() {
                 transition: "all 0.2s ease-in-out",
               }}
             >
-              {tab === "spreadsheet" ? "Spreadsheet" : tab === "cardEditor" ? "Card Editor" : "Embedded Code"}
+              {tab === "spreadsheet" ? "Spreadsheet" : "Card Editor"}
             </div>
           ))}
         </div>
 
-        <div style={{ fontWeight: 700, fontSize: 20, color: "#FFD700" }}>Enso Digital Suite</div>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 22,
+            fontFamily: "'Orbitron', sans-serif",
+            color: "#FFD700",
+            position: "absolute",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1,
+            textShadow: "0 0 8px rgba(255,215,0,0.3)",
+          }}
+        >
+          Enso Digital Suite
+        </div>
 
         <button
           onClick={() => supabase.auth.signOut()}
           style={{
+            position: "relative",
+            zIndex: 1,
             backgroundColor: "#FFD700",
             color: "#001f3f",
             border: "none",
@@ -171,35 +231,44 @@ export default function App() {
         </button>
       </header>
 
+      {/* Main content */}
       <div style={{ flex: 1, overflow: "auto", padding: 10 }}>{renderStage()}</div>
 
+      {/* Footer with tech grid background */}
       <footer
         style={{
+          position: "relative",
           backgroundColor: "#001f3f",
           color: "#FFD700",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           padding: "10px 20px",
+          overflow: "hidden",
         }}
       >
-        <button
-          style={{
-            backgroundColor: "#FFD700",
-            color: "#001f3f",
-            border: "none",
-            padding: "6px 12px",
-            borderRadius: "6px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-          onClick={() => setFeedbackOpen(true)}
-        >
-          Feedback
-        </button>
+        <div style={techGradient}></div>
+        <div style={techGrid}></div>
 
-        <div>© {new Date().getFullYear()} Enso Digital Suite</div>
-        <div>Version 0.0.1</div>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <button
+            style={{
+              backgroundColor: "#FFD700",
+              color: "#001f3f",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: "6px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+            onClick={() => setFeedbackOpen(true)}
+          >
+            Feedback
+          </button>
+        </div>
+
+        <div style={{ position: "relative", zIndex: 1 }}>© {new Date().getFullYear()} Enso Digital Suite</div>
+        <div style={{ position: "relative", zIndex: 1 }}>Version 0.0.1</div>
       </footer>
 
       {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} />}

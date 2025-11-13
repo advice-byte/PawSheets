@@ -2,194 +2,179 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../../supabaseClient.js";
 
-export default function CardEmbed({ worksheetId, worksheet: passedWorksheet }) {
-  const [worksheet, setWorksheet] = useState(passedWorksheet || null);
-  const [styles, setStyles] = useState(null);
+export default function CardEmbed({ worksheetId: propWorksheetId }) {
+  const [cards, setCards] = useState([]);
+  const [styles, setStyles] = useState({});
+  const [loading, setLoading] = useState(true);
   const [htmlCode, setHtmlCode] = useState("");
-  const [iframeCode, setIframeCode] = useState("");
+  const [copied, setCopied] = useState(false);
 
-  // ✅ Load worksheet from Supabase if not passed directly
+  const worksheetId = propWorksheetId || "84a1e73f-1e0f-4fcd-8b5a-490876586115";
+
   useEffect(() => {
-    const id = worksheetId || passedWorksheet?.id;
-    if (!id) return;
-
-    const fetchWorksheet = async () => {
+    const fetchCards = async () => {
+      setLoading(true);
       const { data, error } = await supabase
         .from("worksheets")
         .select("*")
-        .eq("id", id)
+        .eq("id", worksheetId)
         .single();
 
-      if (error) {
+      if (error || !data) {
         console.error("Error fetching worksheet:", error);
-      } else if (data) {
-        setWorksheet(data);
-        setStyles(data.styles || {});
+        setLoading(false);
+        return;
       }
+
+      const rows = data.rows || [];
+      const headerRow = rows[0] || [];
+      const validRows = rows.slice(1).filter((r) =>
+        r.some((cell) => cell?.value && String(cell.value).trim() !== "")
+      );
+
+      const cardData = validRows.map((row) =>
+        (data.columns || []).map((col, ci) => ({
+          header: headerRow[ci]?.value || `Field ${ci}`,
+          value: row[ci]?.value,
+        }))
+      );
+
+      setCards(cardData);
+      setStyles(data.styles || {});
+      setLoading(false);
+
+      const html = generateHTML(cardData, data.styles || {});
+      setHtmlCode(html);
     };
 
-    if (!passedWorksheet) fetchWorksheet();
-    else {
-      setWorksheet(passedWorksheet);
-      setStyles(passedWorksheet.styles || {});
+    fetchCards();
+  }, [worksheetId]);
+
+  const generateHTML = (cards, styles) => {
+    const layout = styles.layout || "row";
+    const cardWidth = styles.cardWidth || 250;
+    const cardHeight = styles.cardHeight || 320;
+    const gap = styles.gap || 12;
+
+    return `
+<div style="display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:${gap}px;padding:20px;">
+${cards
+  .map((cells) => {
+    const imageCell = cells[0];
+    const textFields = cells.slice(1);
+
+    return `
+  <div style="
+    background-color:${styles.backgroundColor || "#fff"};
+    border:${styles.borderWidth || 1}px solid ${styles.borderColor || "#ddd"};
+    border-radius:${styles.borderRadius || 12}px;
+    box-shadow:${styles.cardShadow ? "0 4px 12px rgba(0,0,0,0.1)" : "none"};
+    width:${cardWidth}px;
+    height:${cardHeight}px;
+    overflow:hidden;
+    display:flex;
+    flex-direction:${
+      layout === "top-image"
+        ? "column"
+        : layout === "left-image"
+        ? "row"
+        : layout === "right-image"
+        ? "row-reverse"
+        : "column"
+    };
+    text-align:${styles.textAlign || "left"};
+    color:${styles.textColor || "#333"};
+    font-family:${styles.fontFamily || "Inter, sans-serif"};
+  ">
+    ${
+      imageCell?.value
+        ? `<img src="${imageCell.value}" style="width:${
+            layout === "top-image" ? "100%" : styles.imageWidth || "40%"
+          };height:${
+            layout === "top-image"
+              ? styles.imageHeight || "150px"
+              : styles.imageHeight || "100%"
+          };object-fit:${styles.imageObjectFit || "cover"};"/>`
+        : ""
     }
+    <div style="padding:${styles.padding || 12}px;display:flex;flex-direction:column;justify-content:center;gap:4px;flex:1;">
+      ${textFields
+        .map(
+          (f) => `
+        <div style="font-size:${styles.fontSizePrimary || 14}px;">
+          <strong style="font-size:${
+            styles.fontSizeSecondary || 13
+          }px;">${f.header}:</strong> ${f.value || ""}
+        </div>`
+        )
+        .join("")}
+    </div>
+  </div>
+`;
+  })
+  .join("")}
+</div>`;
+  };
 
-    // ✅ Subscribe to live updates from Supabase
-    const channel = supabase
-      .channel(`realtime:worksheet:${id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "worksheets",
-          filter: `id=eq.${id}`,
-        },
-        (payload) => {
-          console.log("🔄 Worksheet updated:", payload.new);
-          setWorksheet(payload.new);
-          setStyles(payload.new.styles || {});
-        }
-      )
-      .subscribe();
+  const copyToClipboard = async () => {
+    await navigator.clipboard.writeText(htmlCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [worksheetId, passedWorksheet]);
+  if (loading) return <div className="text-center mt-10">Loading cards...</div>;
+  if (!cards.length) return <div className="text-center mt-10">No cards available</div>;
 
-  // ✅ Generate HTML + iframe code whenever worksheet or styles change
-  useEffect(() => {
-    if (!worksheet || !worksheet.rows || !styles) return;
+  const layout = styles.layout || "row";
+  const cardWidth = styles.cardWidth || 250;
+  const cardHeight = styles.cardHeight || 320;
+  const gap = styles.gap || 12;
 
-    const validRows = (worksheet.rows || [])
-      .slice(1)
-      .filter((row) => row.some((cell) => cell?.value && String(cell.value).trim() !== ""));
+  return (
+    <div style={{ maxWidth: "1200px", margin: "0 auto", textAlign: "center" }}>
+      <h2 style={{ fontSize: "20px", margin: "20px 0" }}>Card Preview</h2>
 
-    const html = `
-<div style="
-  display: ${styles.cardArrangement === "grid" ? "grid" : "flex"};
-  ${
-    styles.cardArrangement === "grid"
-      ? `grid-template-columns: repeat(auto-fill, minmax(${styles.cardWidth}px, 1fr)); gap: ${styles.gap}px;`
-      : `flex-direction: ${styles.cardArrangement === "row" ? "row" : "column"}; gap: ${styles.gap}px;`
-  }
-">
-  ${validRows
-    .map((row) => {
-      const cells = (worksheet.columns || []).map((col, ci) => ({
-        header: worksheet.rows[0][ci]?.value || `Field ${ci}`,
-        value: row[ci]?.value,
-        type: col?.type || "text",
-      }));
-      const imageCell = cells[0];
-      const fields = cells.slice(1);
-
-      return `
-    <div style="
-      background-color: ${styles.backgroundColor};
-      border: ${styles.borderWidth}px solid ${styles.borderColor};
-      border-radius: ${styles.borderRadius}px;
-      padding: ${styles.padding}px;
-      box-shadow: ${styles.cardShadow ? "0 6px 18px rgba(0,0,0,0.08)" : "none"};
-      width: ${styles.cardWidth}px;
-      min-height: ${styles.cardHeight}px;
-      font-family: ${styles.fontFamily};
-      color: ${styles.textColor};
-      text-align: ${styles.textAlign};
-      box-sizing: border-box;
-      overflow: hidden;
-      display: flex;
-      flex-direction: ${
-        styles.layout === "top-image"
-          ? "column"
-          : styles.layout === "left-image"
-          ? "row"
-          : "row-reverse"
-      };
-      gap: ${styles.gap}px;
-      align-items: flex-start;
-      flex-wrap: wrap;
-    ">
-      ${
-        imageCell?.value
-          ? `<img src="${imageCell.value}" style="width: ${
-              styles.layout === "top-image" ? "100%" : styles.imageWidth
-            }px; height: ${styles.imageHeight}px; object-fit: ${
-              styles.imageObjectFit
-            }; border-radius: ${styles.borderRadius}px;" />`
-          : ""
-      }
-      <div style="display:flex; flex-direction: column; gap:6px; flex:1;">
-        ${fields
-          .map(
-            (f) =>
-              `<div style="display:flex; gap:4px; flex-wrap:wrap; align-items:baseline;">
-                <span style="font-weight:700; font-size:${styles.fontSizeSecondary}px;">${f.header}:</span>
-                <span style="font-size:${styles.fontSizePrimary}px;">${f.value}</span>
-              </div>`
-          )
-          .join("")}
-      </div>
-    </div>`;
-    })
-    .join("")}
-</div>`.trim();
-
-    const iframe = `<iframe src="${window.location.origin}/embed/${worksheet.id}" style="border:none;width:100%;height:500px;"></iframe>`;
-
-    setHtmlCode(html);
-    setIframeCode(iframe);
-  }, [worksheet, styles]);
-
-  if (!worksheet || !styles) return <div>Loading...</div>;
-
-  // ✅ Card preview renderer
-  const renderCard = () => {
-    const validRows = (worksheet.rows || [])
-      .slice(1)
-      .filter((row) => row.some((cell) => cell?.value && String(cell.value).trim() !== ""));
-    if (!validRows.length) return <div>No data available for cards</div>;
-    const headerRow = worksheet.rows[0];
-
-    const gridStyle =
-      styles.cardArrangement === "grid"
-        ? {
-            display: "grid",
-            gridTemplateColumns: `repeat(auto-fill, minmax(${styles.cardWidth}px, 1fr))`,
-            gap: styles.gap,
-          }
-        : {
-            display: "flex",
-            flexDirection: styles.cardArrangement === "row" ? "row" : "column",
-            gap: styles.gap,
-          };
-
-    return (
-      <div style={gridStyle}>
-        {validRows.map((row, rIndex) => {
-          const cells = (worksheet.columns || []).map((col, ci) => ({
-            header: headerRow[ci]?.value || `Field ${ci}`,
-            value: row[ci]?.value,
-            type: col?.type || "text",
-          }));
-
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          alignItems: "flex-start",
+          gap: `${gap}px`,
+          padding: "20px",
+        }}
+      >
+        {cards.map((cells, i) => {
           const imageCell = cells[0];
-          const fields = cells.slice(1);
+          const textFields = cells.slice(1);
 
-          const content = (
+          return (
             <div
+              key={i}
               style={{
+                backgroundColor: styles.backgroundColor || "#fff",
+                border: `${styles.borderWidth || 1}px solid ${
+                  styles.borderColor || "#ddd"
+                }`,
+                borderRadius: `${styles.borderRadius || 12}px`,
+                boxShadow: styles.cardShadow
+                  ? "0 4px 12px rgba(0,0,0,0.1)"
+                  : "none",
+                width: `${cardWidth}px`,
+                height: `${cardHeight}px`,
+                overflow: "hidden",
                 display: "flex",
                 flexDirection:
-                  styles.layout === "top-image"
+                  layout === "top-image"
                     ? "column"
-                    : styles.layout === "left-image"
+                    : layout === "left-image"
                     ? "row"
-                    : "row-reverse",
-                gap: styles.gap,
-                alignItems: "flex-start",
-                flexWrap: "wrap",
+                    : layout === "right-image"
+                    ? "row-reverse"
+                    : "column",
+                textAlign: styles.textAlign || "left",
+                color: styles.textColor || "#333",
+                fontFamily: styles.fontFamily || "Inter, sans-serif",
               }}
             >
               {imageCell?.value && (
@@ -197,102 +182,87 @@ export default function CardEmbed({ worksheetId, worksheet: passedWorksheet }) {
                   src={imageCell.value}
                   alt=""
                   style={{
-                    width: styles.layout === "top-image" ? "100%" : styles.imageWidth,
-                    height: styles.imageHeight,
-                    objectFit: styles.imageObjectFit,
-                    borderRadius: styles.borderRadius,
-                    flex: "0 0 auto",
+                    width:
+                      layout === "top-image" ? "100%" : styles.imageWidth || "40%",
+                    height:
+                      layout === "top-image"
+                        ? styles.imageHeight || "150px"
+                        : styles.imageHeight || "100%",
+                    objectFit: styles.imageObjectFit || "cover",
                   }}
                 />
               )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-                {fields.map((f, i) => (
+              <div
+                style={{
+                  padding: `${styles.padding || 12}px`,
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  gap: "4px",
+                  flex: 1,
+                }}
+              >
+                {textFields.map((f, fi) => (
                   <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      gap: 4,
-                      flexWrap: "wrap",
-                      alignItems: "baseline",
-                    }}
+                    key={fi}
+                    style={{ fontSize: `${styles.fontSizePrimary || 14}px` }}
                   >
-                    <span style={{ fontWeight: 700, fontSize: styles.fontSizeSecondary }}>
+                    <strong
+                      style={{
+                        fontSize: `${styles.fontSizeSecondary || 13}px`,
+                      }}
+                    >
                       {f.header}:
-                    </span>
-                    <span style={{ fontSize: styles.fontSizePrimary }}>{f.value}</span>
+                    </strong>{" "}
+                    {f.value}
                   </div>
                 ))}
               </div>
             </div>
           );
-
-          const containerStyle = {
-            backgroundColor: styles.backgroundColor,
-            border: `${styles.borderWidth}px solid ${styles.borderColor}`,
-            borderRadius: styles.borderRadius,
-            padding: styles.padding,
-            boxShadow: styles.cardShadow ? "0 6px 18px rgba(0,0,0,0.08)" : "none",
-            width: styles.cardWidth,
-            minHeight: styles.cardHeight,
-            boxSizing: "border-box",
-            overflow: "hidden",
-            fontFamily: styles.fontFamily,
-            color: styles.textColor,
-            textAlign: styles.textAlign,
-          };
-
-          return (
-            <div key={rIndex} style={containerStyle}>
-              {content}
-            </div>
-          );
         })}
       </div>
-    );
-  };
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div>
-        <h3>Live Preview:</h3>
-        {renderCard()}
-      </div>
+      {/* === HTML Generator Output === */}
+      <div style={{ marginTop: "30px", textAlign: "left" }}>
+        <h3 style={{ fontSize: "18px" }}>Embed HTML Code:</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button
+            onClick={copyToClipboard}
+            style={{
+              padding: "8px 14px",
+              background: copied ? "#4caf50" : "#007bff",
+              color: "#fff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "14px",
+              transition: "background 0.3s ease",
+            }}
+          >
+            {copied ? "Copied!" : "Copy HTML"}
+          </button>
+          {copied && (
+            <span style={{ color: "#4caf50", fontSize: "14px" }}>
+              ✅ Code copied to clipboard
+            </span>
+          )}
+        </div>
 
-      <div>
-        <h3>Embed HTML:</h3>
         <textarea
           readOnly
           value={htmlCode}
           style={{
             width: "100%",
-            height: 300,
-            background: "#f5f5f5",
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            padding: 10,
+            height: "300px",
+            padding: "10px",
             fontFamily: "monospace",
-            fontSize: 13,
-          }}
-          onClick={(e) => e.target.select()}
-        />
-      </div>
-
-      <div>
-        <h3>Embed IFrame:</h3>
-        <textarea
-          readOnly
-          value={iframeCode}
-          style={{
-            width: "100%",
-            height: 60,
-            background: "#f5f5f5",
-            borderRadius: 10,
+            fontSize: "13px",
+            background: "#f9f9f9",
             border: "1px solid #ccc",
-            padding: 10,
-            fontFamily: "monospace",
-            fontSize: 13,
+            borderRadius: "6px",
+            marginTop: "10px",
           }}
-          onClick={(e) => e.target.select()}
         />
       </div>
     </div>
