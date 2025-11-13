@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import Auth from "./components/Auth.jsx";
@@ -11,6 +12,7 @@ export default function App() {
   const [stage, setStage] = useState("spreadsheet");
   const [loading, setLoading] = useState(true);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false); // ✅ New: track if auth is checked
   const saveTimeout = useRef(null);
 
   // ✅ Improved Auth handling (fewer re-renders)
@@ -21,6 +23,7 @@ export default function App() {
       const { data } = await supabase.auth.getSession();
       if (mounted) {
         setUser(data.session?.user ?? null);
+        setAuthChecked(true); // mark that auth is checked
         setLoading(false);
       }
     };
@@ -113,8 +116,8 @@ export default function App() {
     if (worksheet) debouncedSave(worksheet);
   }, [worksheet, debouncedSave]);
 
-  // ✅ Render Auth first if user not authenticated
-  if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
+  // 🔹 Auth must appear first until session is checked
+  if (!authChecked) return <div style={{ padding: 20 }}>Loading...</div>;
   if (!user) return <Auth onAuth={(u) => setUser(u)} />;
 
   const renderStage = () => {
@@ -214,7 +217,10 @@ export default function App() {
         </div>
 
         <button
-          onClick={() => supabase.auth.signOut()}
+          onClick={async () => {
+            await supabase.auth.signOut();
+            setUser(null); // clear state immediately
+          }}
           style={{
             position: "relative",
             zIndex: 1,
