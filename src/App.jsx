@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import Auth from "./components/Auth.jsx";
@@ -114,6 +113,7 @@ export default function App() {
     if (worksheet) debouncedSave(worksheet);
   }, [worksheet, debouncedSave]);
 
+  // ✅ Render Auth first if user not authenticated
   if (loading) return <div style={{ padding: 20 }}>Loading...</div>;
   if (!user) return <Auth onAuth={(u) => setUser(u)} />;
 
